@@ -1,0 +1,46 @@
+resources:
+- type: compute.v1.instance
+  name: vpn-vm
+  properties:
+    canIpForward: true
+    zone: ZONE
+    machineType: https://www.googleapis.com/compute/v1/projects/PROJECT_ID/zones/ZONE/machineTypes/e2-micro
+    disks:
+    - deviceName: base-1
+      type: PERSISTENT
+      boot: true
+      autoDelete: true
+      initializeParams:
+        sourceImage: https://www.googleapis.com/compute/v1/projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts
+    metadata:
+      items:
+      - key: startup-script
+        value: |
+          if pgrep pluto > /dev/null
+          then
+              echo "IPSEC SERVICE ALREADY RUNNING NOTHING TO DO..."
+          else
+              curl -sL https://git.io/vpnquickstart -o vpn.sh && \
+              sudo sh vpn.sh && \ 
+              last_line=$(sudo tail -n 1 /etc/ipsec.d/ikev2.conf)
+              sudo echo "  authby=rsa-sha1" >> /etc/ipsec.d/ikev2.conf && \ 
+              sudo service ipsec restart && \ 
+              cd /home/gulolio && \
+              sudo ikev2.sh --exportclient vpnclient
+              iptables -t mangle -A FORWARD -m policy --pol ipsec --dir in \
+                  -p tcp -m tcp --tcp-flags SYN,RST SYN -m tcpmss --mss 1361:1536 \
+                  -j TCPMSS --set-mss 1360
+                iptables -t mangle -A FORWARD -m policy --pol ipsec --dir out \
+                  -p tcp -m tcp --tcp-flags SYN,RST SYN -m tcpmss --mss 1361:1536 \
+                  -j TCPMSS --set-mss 1360
+                echo 1 > /proc/sys/net/ipv4/ip_no_pmtu_disc
+          fi
+    tags:
+      items: ["vpn"]
+    networkInterfaces:
+      - network: https://www.googleapis.com/compute/v1/projects/PROJECT_ID/global/networks/default
+        accessConfigs:
+        - kind: compute#accessConfig
+          name: External NAT
+          type: ONE_TO_ONE_NAT
+          natIP: IP_ADDRESS
